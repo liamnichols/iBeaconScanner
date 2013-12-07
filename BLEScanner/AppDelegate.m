@@ -107,13 +107,13 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     [data getBytes:&uuidBytes range:uuidRange];
     NSUUID *uuid = [[NSUUID alloc] initWithUUIDBytes:uuidBytes];
     
-    int16_t majorBytes;
+    uint16_t majorBytes;
     [data getBytes:&majorBytes range:majorRange];
-    int16_t majorBytesBig = (majorBytes >> 8) | (majorBytes << 8);
+    uint16_t majorBytesBig = (majorBytes >> 8) | (majorBytes << 8);
     
-    int16_t minorBytes;
+    uint16_t minorBytes;
     [data getBytes:&minorBytes range:minorRange];
-    int16_t minorBytesBig = (minorBytes >> 8) | (minorBytes << 8);
+    uint16_t minorBytesBig = (minorBytes >> 8) | (minorBytes << 8);
     
     int8_t powerByte;
     [data getBytes:&powerByte range:powerRange];
