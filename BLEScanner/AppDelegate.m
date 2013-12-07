@@ -74,8 +74,17 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     {
         NSMutableDictionary *beacon = [NSMutableDictionary dictionaryWithDictionary:[self getBeaconInfoFromData:advData]];
         [beacon setObject:RSSI forKey:@"RSSI"];
+        [beacon setObject:peripheral.identifier forKey:@"deviceUUID"];
+        
+        NSUUID *deviceUUID = peripheral.identifier;
+        NSUUID *beaconUUID = beacon[@"uuid"];
+        
+        NSString *uniqueUUID = [deviceUUID UUIDString];
+        if (beaconUUID) {
+            uniqueUUID = [uniqueUUID stringByAppendingString:[beaconUUID UUIDString]];
+        }
 
-        [self.beacons setObject:beacon forKey:peripheral.identifier];
+        [self.beacons setObject:beacon forKey:uniqueUUID];
     }
 }
 
@@ -257,6 +266,9 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     }
     
     NSDictionary *beacon = [[self.beacons allValues] objectAtIndex:row];
+    if ([tableColumn.identifier isEqualToString:@"devuuid"])
+        result.stringValue = [[beacon objectForKey:@"deviceUUID"] UUIDString];
+    
     if ([tableColumn.identifier isEqualToString:@"uuid"])
         result.stringValue = [[beacon objectForKey:@"uuid"] UUIDString];
     
