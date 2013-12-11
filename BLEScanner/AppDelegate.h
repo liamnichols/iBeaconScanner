@@ -18,6 +18,8 @@
 
 @property (assign) IBOutlet NSButton *scanButton;
 
+@property (assign) IBOutlet NSButton *repeatCheckbox;
+
 @property (assign) IBOutlet NSTableView *tableView;
 
 @end

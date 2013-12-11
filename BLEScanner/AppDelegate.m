@@ -10,13 +10,14 @@
 
 #import "AppDelegate.h"
 
-static const NSTimeInterval kScanTimeInterval = 5.0;
+static const NSTimeInterval kScanTimeInterval = 1.0;
 
 @interface AppDelegate () <CBCentralManagerDelegate, CBPeripheralDelegate>
 
 @property (nonatomic, strong) CBCentralManager *manager;
 
-@property (nonatomic, strong) NSMutableDictionary *beacons;
+@property (nonatomic, strong) NSArray *beacons;
+@property (nonatomic, strong) NSMutableDictionary *foundBeacons;
 
 @property (nonatomic) BOOL canScan;
 @property (nonatomic) BOOL isScanning;
@@ -73,18 +74,51 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     if ([self advDataIsBeacon:advData])
     {
         NSMutableDictionary *beacon = [NSMutableDictionary dictionaryWithDictionary:[self getBeaconInfoFromData:advData]];
+        
+        //rssi
         [beacon setObject:RSSI forKey:@"RSSI"];
+
+        //peripheral uuid
         [beacon setObject:peripheral.identifier forKey:@"deviceUUID"];
         
+        //distance
+        NSNumber *distance = [self calculatedDistance:[beacon objectForKey:@"power"] RSSI:RSSI];
+        if (distance) {
+            [beacon setObject:distance forKey:@"distance"];
+        }
+        
+        //combined uuid
         NSUUID *deviceUUID = peripheral.identifier;
         NSUUID *beaconUUID = beacon[@"uuid"];
-        
+    
         NSString *uniqueUUID = [deviceUUID UUIDString];
         if (beaconUUID) {
             uniqueUUID = [uniqueUUID stringByAppendingString:[beaconUUID UUIDString]];
         }
 
-        [self.beacons setObject:beacon forKey:uniqueUUID];
+        //add to beacon dictionary
+        [self.foundBeacons setObject:beacon forKey:uniqueUUID];
+    }
+}
+
+//algorythm taken from http://stackoverflow.com/a/20434019/814389
+//I've seen this method mentioned a couple of times but cannot verify its accuracy
+- (NSNumber *)calculatedDistance:(NSNumber *)txPowerNum RSSI:(NSNumber *)RSSINum
+{
+    int txPower = [txPowerNum intValue];
+    double rssi = [RSSINum doubleValue];
+    
+    if (rssi == 0) {
+        return nil; // if we cannot determine accuracy, return nil.
+    }
+    
+    double ratio = rssi * 1.0 / txPower;
+    if (ratio < 1.0) {
+        return @(pow(ratio, 10.0));
+    }
+    else {
+        double accuracy =  (0.89976) * pow(ratio, 7.7095) + 0.111;
+        return @(accuracy);
     }
 }
 
@@ -127,8 +161,6 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     int8_t powerByte;
     [data getBytes:&powerByte range:powerRange];
     
-
-    
     return @{ @"uuid" : uuid, @"major" : @(majorBytesBig), @"minor" : @(minorBytesBig), @"power" : @(powerByte) };
 }
 
@@ -148,11 +180,19 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
             [self.durationTextField setDoubleValue:kScanTimeInterval];
         }
         
-        self.beacons = nil;
+
+        if (self.repeatCheckbox.state == NSOffState)
+        {
+            self.beacons = nil;
+            [self.tableView reloadData];
+        }
+        
         self.isScanning = YES;
+        
         [self.manager scanForPeripheralsWithServices:nil options:nil];
-        self.scanTimer = [NSTimer scheduledTimerWithTimeInterval:duration target:self selector:@selector(stopScanning) userInfo:nil repeats:NO];
-        [self.tableView reloadData];
+        
+        self.scanTimer = [NSTimer scheduledTimerWithTimeInterval:duration target:self selector:@selector(timerDidFire) userInfo:nil repeats:NO];
+        
         NSLog(@"started scanning");
         return YES;
     }
@@ -165,13 +205,19 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     [self.manager stopScan];
     self.isScanning = NO;
     [self.scanTimer invalidate];
-    [self didStopScanning];
 }
 
-- (void)didStopScanning
+- (void)timerDidFire
 {
-    NSLog(@"scan complete");
-    NSLog(@"beacons: %@",self.beacons);
+    NSLog(@"found beacons during scan: %@",[self.foundBeacons allValues]);
+    self.beacons = [self.foundBeacons allValues];
+    [self.foundBeacons removeAllObjects];
+    [self stopScanning];
+    
+    if (self.repeatCheckbox.state != NSOffState)
+    {
+        [self startScanning];
+    }
     
     [self.tableView reloadData];
 }
@@ -190,6 +236,7 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
             self.scanButton.title = @"Stop Scanning";
             self.scanButton.target = self;
             self.scanButton.action = @selector(stopScanning);
+            [self.repeatCheckbox setEnabled:NO];
         }
         else if (self.canScan)
         {
@@ -197,6 +244,7 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
             self.scanButton.title = @"Start Scanning";
             self.scanButton.target = self;
             self.scanButton.action = @selector(startScanning);
+            [self.repeatCheckbox setEnabled:YES];
         }
         else if (!self.canScan)
         {
@@ -204,6 +252,7 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
             self.scanButton.title = @"Start Scanning";
             self.scanButton.target = nil;
             self.scanButton.action = nil;
+            [self.repeatCheckbox setEnabled:YES];
         }
     }
 }
@@ -220,6 +269,7 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
             [self.scanButton setTitle:@"Start Scanning"];
             [self.scanButton setTarget:self];
             [self.scanButton setAction:@selector(startScanning)];
+            [self.repeatCheckbox setEnabled:YES];
         }
         else
         {
@@ -227,18 +277,19 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
             [self.scanButton setTitle:@"Start Scanning"];
             [self.scanButton setTarget:self];
             [self.scanButton setAction:@selector(startScanning)];
+            [self.repeatCheckbox setEnabled:NO];
         }
     }
 }
 
 #pragma mark - Lazy Loading
 
--(NSMutableDictionary *)beacons
+-(NSMutableDictionary *)foundBeacons
 {
-    if (!_beacons) {
-        _beacons = [NSMutableDictionary new];
+    if (!_foundBeacons) {
+        _foundBeacons = [NSMutableDictionary new];
     }
-    return _beacons;
+    return _foundBeacons;
 }
 
 #pragma mark NSTableView
@@ -265,7 +316,7 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
         [result setEditable:NO];
     }
     
-    NSDictionary *beacon = [[self.beacons allValues] objectAtIndex:row];
+    NSDictionary *beacon = [self.beacons objectAtIndex:row];
     if ([tableColumn.identifier isEqualToString:@"devuuid"])
         result.stringValue = [[beacon objectForKey:@"deviceUUID"] UUIDString];
     
@@ -279,11 +330,16 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
         result.stringValue = [[beacon objectForKey:@"minor"] stringValue];
     
     if ([tableColumn.identifier isEqualToString:@"power"])
-        result.stringValue = [[beacon objectForKey:@"power"] stringValue];
+        result.stringValue = [self decibelStringFromNumber:[beacon objectForKey:@"power"]];
     
     if ([tableColumn.identifier isEqualToString:@"rssi"])
-        result.stringValue = [[beacon objectForKey:@"RSSI"] stringValue];
+        result.stringValue = [self decibelStringFromNumber:[beacon objectForKey:@"RSSI"]];
     
+    if ([tableColumn.identifier isEqualToString:@"distance"])
+        result.stringValue = [self distanceStringFromNumber:[beacon objectForKey:@"distance"]];
+    
+    if ([tableColumn.identifier isEqualToString:@"proximity"])
+        result.stringValue = [self proximityFromDistance:[beacon objectForKey:@"distance"]];
     
     
     // return the result.
@@ -291,5 +347,32 @@ static const NSTimeInterval kScanTimeInterval = 5.0;
     
 }
 
+- (NSString *)decibelStringFromNumber:(NSNumber *)dbVal
+{
+    return [NSString stringWithFormat:@"%idB",[dbVal intValue]];
+}
+
+- (NSString *)distanceStringFromNumber:(NSNumber *)distance
+{
+    if (distance) {
+        return [NSString stringWithFormat:@"%.2fm",[distance doubleValue]];
+    }
+    return @"-";
+}
+
+- (NSString *)proximityFromDistance:(NSNumber *)distance
+{
+    if (distance == nil) {
+        distance = @(-1);
+    }
+    
+    if (distance.doubleValue >= 2.0)
+        return @"Far";
+    if (distance.doubleValue >= 0.25)
+        return @"Near";
+    if (distance.doubleValue >= 0)
+        return @"immediate";
+    return @"Unknown";
+}
 
 @end
