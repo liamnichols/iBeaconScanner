@@ -16,7 +16,7 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
 
 @property (nonatomic, strong) CBCentralManager *manager;
 
-@property (nonatomic, strong) NSArray *beacons;
+@property (nonatomic, strong) NSMutableArray *beacons;
 @property (nonatomic, strong) NSMutableDictionary *foundBeacons;
 
 @property (nonatomic) BOOL canScan;
@@ -79,7 +79,7 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
         [beacon setObject:RSSI forKey:@"RSSI"];
 
         //peripheral uuid
-        [beacon setObject:peripheral.identifier forKey:@"deviceUUID"];
+        [beacon setObject:peripheral.identifier.UUIDString forKey:@"deviceUUID"];
         
         //distance
         NSNumber *distance = [self calculatedDistance:[beacon objectForKey:@"power"] RSSI:RSSI];
@@ -87,13 +87,15 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
             [beacon setObject:distance forKey:@"distance"];
         }
         
+        //proximity
+        [beacon setObject:[self proximityFromDistance:distance] forKey:@"proximity"];
+        
         //combined uuid
-        NSUUID *deviceUUID = peripheral.identifier;
-        NSUUID *beaconUUID = beacon[@"uuid"];
-    
-        NSString *uniqueUUID = [deviceUUID UUIDString];
+        NSString *uniqueUUID = peripheral.identifier.UUIDString;
+        NSString *beaconUUID = beacon[@"uuid"];
+        
         if (beaconUUID) {
-            uniqueUUID = [uniqueUUID stringByAppendingString:[beaconUUID UUIDString]];
+            uniqueUUID = [uniqueUUID stringByAppendingString:beaconUUID];
         }
 
         //add to beacon dictionary
@@ -161,7 +163,7 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
     int8_t powerByte;
     [data getBytes:&powerByte range:powerRange];
     
-    return @{ @"uuid" : uuid, @"major" : @(majorBytesBig), @"minor" : @(minorBytesBig), @"power" : @(powerByte) };
+    return @{ @"uuid" : uuid.UUIDString, @"major" : @(majorBytesBig), @"minor" : @(minorBytesBig), @"power" : @(powerByte) };
 }
 
 #pragma mark - Scanning
@@ -210,7 +212,9 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
 - (void)timerDidFire
 {
     NSLog(@"found beacons during scan: %@",[self.foundBeacons allValues]);
-    self.beacons = [self.foundBeacons allValues];
+    self.beacons = [[self.foundBeacons allValues] mutableCopy];
+    [self.beacons sortUsingDescriptors:self.tableView.sortDescriptors];
+    
     [self.foundBeacons removeAllObjects];
     [self stopScanning];
     
@@ -311,17 +315,19 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
         
         result = [[NSTextField alloc] initWithFrame:CGRectZero];
         [result setBordered:NO];
+        [result setSelectable:NO];
         [result setBackgroundColor:[NSColor clearColor]];
+        [result setAlignment:NSCenterTextAlignment];
         [result setIdentifier:@"MyView"];
         [result setEditable:NO];
     }
     
     NSDictionary *beacon = [self.beacons objectAtIndex:row];
     if ([tableColumn.identifier isEqualToString:@"devuuid"])
-        result.stringValue = [[beacon objectForKey:@"deviceUUID"] UUIDString];
+        result.stringValue = [beacon objectForKey:@"deviceUUID"];
     
     if ([tableColumn.identifier isEqualToString:@"uuid"])
-        result.stringValue = [[beacon objectForKey:@"uuid"] UUIDString];
+        result.stringValue = [beacon objectForKey:@"uuid"];
     
     if ([tableColumn.identifier isEqualToString:@"major"])
         result.stringValue = [[beacon objectForKey:@"major"] stringValue];
@@ -339,7 +345,7 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
         result.stringValue = [self distanceStringFromNumber:[beacon objectForKey:@"distance"]];
     
     if ([tableColumn.identifier isEqualToString:@"proximity"])
-        result.stringValue = [self proximityFromDistance:[beacon objectForKey:@"distance"]];
+        result.stringValue = [beacon objectForKey:@"proximity"];
     
     
     // return the result.
@@ -373,6 +379,25 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
     if (distance.doubleValue >= 0)
         return @"immediate";
     return @"Unknown";
+}
+
+- (void)tableView:(NSTableView *)tableView
+    didAddRowView:(NSTableRowView *)rowView
+           forRow:(NSInteger)row {
+    
+    if (row % 2 == 1) {
+        [rowView setBackgroundColor:[NSColor colorWithWhite:0.9294117647 alpha:1.0]];
+    }
+    
+}
+
+-(void)tableView:(NSTableView *)tableView sortDescriptorsDidChange: (NSArray *)oldDescriptors
+{
+    NSArray *newDescriptors = [tableView sortDescriptors];
+
+    [self.beacons sortUsingDescriptors:newDescriptors];
+
+    [tableView reloadData];
 }
 
 @end
