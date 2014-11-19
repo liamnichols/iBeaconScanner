@@ -320,6 +320,7 @@ static const NSTimeInterval kScanTimeInterval = 1.0;
         [result setAlignment:NSCenterTextAlignment];
         [result setIdentifier:@"MyView"];
         [result setEditable:NO];
+        [result setSelectable:YES];
     }
     
     NSDictionary *beacon = [self.beacons objectAtIndex:row];
